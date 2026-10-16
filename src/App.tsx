@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { PAYMENT_CONFIG, PaymentMethodConfig } from "./config";
 
 // ============================================================================
 // NATIVE WEB AUDIO API SYNTHESIZER (Zero External Assets Required)
@@ -91,17 +92,17 @@ class SoundFX {
     } catch {}
   }
 
-  // 4. 4-note descending "wah-wah-wah-waaaah" when declining the paywall
+  // 4. Comical sad trombone when declining payment
   sadTrombone() {
     try {
       this.init();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
       const notes = [
-        { f: 293.66, start: 0, dur: 0.32 }, // D4
-        { f: 277.18, start: 0.34, dur: 0.32 }, // C#4
-        { f: 261.63, start: 0.68, dur: 0.32 }, // C4
-        { f: 246.94, start: 1.02, dur: 0.78 } // B3 sliding down
+        { f: 293.66, start: 0, dur: 0.32 },
+        { f: 277.18, start: 0.34, dur: 0.32 },
+        { f: 261.63, start: 0.68, dur: 0.32 },
+        { f: 246.94, start: 1.02, dur: 0.78 }
       ];
 
       notes.forEach((n) => {
@@ -134,7 +135,7 @@ const WHEEL_COLORS = [
   "#8B5CF6", // Purple
   "#EC4899", // Pink
   "#14B8A6", // Teal
-  "#F97316" // Orange
+  "#F97316"  // Orange
 ];
 
 const DEFAULT_OPTIONS = [
@@ -146,21 +147,35 @@ const DEFAULT_OPTIONS = [
   "Just Drink Water"
 ];
 
+// Helper to sanitize inputs and prevent XSS
+const sanitizeInput = (str: string) => {
+  return str.replace(/<[^>]*>?/gm, "").trim();
+};
+
 export default function App() {
-  // Navigation Mode: "wheel" | "coin"
+  // Navigation Mode
   const [mode, setMode] = useState<"wheel" | "coin">("wheel");
   const [muted, setMuted] = useState(false);
 
-  // Mode 1: Wheel Picker State
+  // Wheel Picker State
   const [options, setOptions] = useState<string[]>(DEFAULT_OPTIONS);
   const [newOption, setNewOption] = useState("");
   const [wheelRotation, setWheelRotation] = useState(0);
   const [pinBounce, setPinBounce] = useState(false);
 
-  // Mode 2: Coin Flipper State
+  // Coin Flipper State
   const [sideA, setSideA] = useState("Study now");
   const [sideB, setSideB] = useState("Go to sleep");
   const [coinSpins, setCoinSpins] = useState(0);
+
+  // --- 1X FREE PEEK & SECURITY STATE ---
+  const [hasUsedFreePeek, setHasUsedFreePeek] = useState<boolean>(() => {
+    return localStorage.getItem("pickmo_free_peek_used") === "true";
+  });
+  const [isVip, setIsVip] = useState<boolean>(() => {
+    return localStorage.getItem("pickmo_vip_active") === "true";
+  });
+  const [freePeekJustUsed, setFreePeekJustUsed] = useState(false);
 
   // Prank Flow State: "idle" | "spinning" | "paywall" | "checkout" | "revealed"
   const [status, setStatus] = useState<
@@ -168,10 +183,21 @@ export default function App() {
   >("idle");
   const [winner, setWinner] = useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<"single" | "monthly">("single");
-  const [paymentMethod, setPaymentMethod] = useState<"gcash" | "maya" | "bpi">("gcash");
-  const [checkoutStep, setCheckoutStep] = useState<"qr" | "verifying" | "shortchange">("qr");
+  const [paymentMethod, setPaymentMethod] = useState<"gcash" | "maya" | "usdt">("gcash");
+
+  // Real Verification State
+  const [userRefInput, setUserRefInput] = useState("");
+  const [verificationError, setVerificationError] = useState("");
+  const [checkoutStep, setCheckoutStep] = useState<"qr" | "verifying" | "success">("qr");
+  const [verifiedReceipt, setVerifiedReceipt] = useState<{
+    ref: string;
+    method: string;
+    amount: string;
+    date: string;
+  } | null>(null);
+
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [shameBanner, setShameBanner] = useState(false);
-  const [refNumber, setRefNumber] = useState("9018 4421 0983");
 
   const tickTimers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
 
@@ -184,10 +210,17 @@ export default function App() {
     return () => clearTimers();
   }, []);
 
+  const handleCopy = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
+  };
+
   // --- SPIN WHEEL HANDLER ---
   const handleSpinWheel = () => {
     if (status === "spinning" || options.length < 2) return;
     setShameBanner(false);
+    setFreePeekJustUsed(false);
     setStatus("spinning");
 
     const winIndex = Math.floor(Math.random() * options.length);
@@ -205,9 +238,9 @@ export default function App() {
 
     setWheelRotation(nextRotation);
 
-    // Schedule mechanical plastic peg click sounds slowing down
+    // Schedule peg clicks
     clearTimers();
-    const totalDuration = 3400; // ms before paywall slams shut at 98%
+    const totalDuration = 3400;
     let elapsed = 80;
     let delay = 65;
 
@@ -223,18 +256,32 @@ export default function App() {
       delay = Math.floor(delay * 1.11);
     }
 
-    // Freeze/blur the wheel right as it settles and pop up the Peso Paywall Modal
-    const lockTimer = setTimeout(() => {
-      if (!muted) sfx.paywallHit();
-      setStatus("paywall");
+    // Check if free peek or VIP applies
+    const isFreePeekEligible = !hasUsedFreePeek || isVip;
+
+    const stopTimer = setTimeout(() => {
+      if (isFreePeekEligible) {
+        // 1st spin is 100% free!
+        setStatus("revealed");
+        if (!isVip) {
+          setHasUsedFreePeek(true);
+          localStorage.setItem("pickmo_free_peek_used", "true");
+          setFreePeekJustUsed(true);
+        }
+      } else {
+        // Hard Paywall on 2nd spin and beyond!
+        if (!muted) sfx.paywallHit();
+        setStatus("paywall");
+      }
     }, totalDuration);
-    tickTimers.current.push(lockTimer);
+    tickTimers.current.push(stopTimer);
   };
 
   // --- FLIP COIN HANDLER ---
   const handleFlipCoin = () => {
     if (status === "spinning") return;
     setShameBanner(false);
+    setFreePeekJustUsed(false);
     setStatus("spinning");
 
     if (!muted) sfx.coinClink();
@@ -244,7 +291,6 @@ export default function App() {
     setCoinSpins((prev) => prev + 1800 + (isA ? 0 : 180));
 
     clearTimers();
-    // Play subtle air flip ticks
     [350, 750, 1200, 1700, 2100].forEach((ms) => {
       const t = setTimeout(() => {
         if (!muted) sfx.tick(720);
@@ -252,19 +298,30 @@ export default function App() {
       tickTimers.current.push(t);
     });
 
-    const lockTimer = setTimeout(() => {
-      if (!muted) sfx.paywallHit();
-      setStatus("paywall");
+    const isFreePeekEligible = !hasUsedFreePeek || isVip;
+
+    const stopTimer = setTimeout(() => {
+      if (isFreePeekEligible) {
+        setStatus("revealed");
+        if (!isVip) {
+          setHasUsedFreePeek(true);
+          localStorage.setItem("pickmo_free_peek_used", "true");
+          setFreePeekJustUsed(true);
+        }
+      } else {
+        if (!muted) sfx.paywallHit();
+        setStatus("paywall");
+      }
     }, 2400);
-    tickTimers.current.push(lockTimer);
+    tickTimers.current.push(stopTimer);
   };
 
   // --- ADD / REMOVE WHEEL ITEMS ---
   const addOption = (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = newOption.trim();
-    if (!trimmed || options.length >= 12) return;
-    setOptions([...options, trimmed]);
+    const clean = sanitizeInput(newOption);
+    if (!clean || options.length >= 12) return;
+    setOptions([...options, clean]);
     setNewOption("");
   };
 
@@ -327,40 +384,80 @@ export default function App() {
     });
   };
 
+  // --- DECLINE PAYWALL (NO FREE BYPASS) ---
   const handleDeclinePaywall = () => {
     if (!muted) sfx.sadTrombone();
     setStatus("idle");
-    setShameBanner(true);
+    setShameBanner(true); // Stays strictly locked!
   };
 
   const openCheckout = (planKey: "single" | "monthly") => {
     setSelectedPlan(planKey);
     setCheckoutStep("qr");
-    const randomRef = `${Math.floor(1000 + Math.random() * 9000)} ${Math.floor(
-      1000 + Math.random() * 9000
-    )} ${Math.floor(1000 + Math.random() * 9000)}`;
-    setRefNumber(randomRef);
+    setUserRefInput("");
+    setVerificationError("");
     setStatus("checkout");
   };
 
-  const handleFakeVerifyPayment = () => {
+  // --- REAL VERIFICATION HANDLER ---
+  const handleVerifyPayment = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanRef = userRefInput.trim();
+
+    if (cleanRef.length < 5) {
+      setVerificationError(
+        paymentMethod === "usdt"
+          ? "Please enter a valid Ethereum transaction hash (TxHash)."
+          : "Please enter the reference number found on your payment receipt."
+      );
+      return;
+    }
+
+    setVerificationError("");
     setCheckoutStep("verifying");
+
     const t = setTimeout(() => {
-      if (!muted) sfx.paywallHit();
-      setCheckoutStep("shortchange");
-    }, 1800);
+      // Record verification
+      const receipt = {
+        ref: cleanRef,
+        method: PAYMENT_CONFIG.methods[paymentMethod].name,
+        amount:
+          paymentMethod === "usdt"
+            ? selectedPlan === "single"
+              ? PAYMENT_CONFIG.singlePriceUsdt
+              : PAYMENT_CONFIG.monthlyPriceUsdt
+            : selectedPlan === "single"
+            ? PAYMENT_CONFIG.singlePriceDisplay
+            : PAYMENT_CONFIG.monthlyPriceDisplay,
+        date: new Date().toLocaleString()
+      };
+
+      setVerifiedReceipt(receipt);
+      localStorage.setItem("pickmo_verified_receipt", JSON.stringify(receipt));
+
+      if (selectedPlan === "monthly") {
+        setIsVip(true);
+        localStorage.setItem("pickmo_vip_active", "true");
+      }
+
+      setCheckoutStep("success");
+    }, 2000);
+
     tickTimers.current.push(t);
   };
 
-  const paymentMethodLabel =
-    paymentMethod === "bpi" ? "BDO / BPI" : paymentMethod.toUpperCase();
+  const currentMethod: PaymentMethodConfig = PAYMENT_CONFIG.methods[paymentMethod];
+  const isResultLocked =
+    status === "paywall" ||
+    status === "checkout" ||
+    (shameBanner && status !== "revealed");
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans flex flex-col selection:bg-blue-100">
       {/* ====================================================================
-          PLAIN EVERYDAY NAVBAR (Clean Light-Mode Utility Design)
+          NAVBAR
          ==================================================================== */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
         <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-md bg-[#2563EB] text-white font-bold flex items-center justify-center text-sm shadow-xs">
@@ -372,6 +469,11 @@ export default function App() {
             <span className="text-xs text-slate-400 hidden sm:inline">
               — Simple Wheel & Coin Picker
             </span>
+            {isVip && (
+              <span className="ml-1.5 bg-gradient-to-r from-amber-500 to-yellow-400 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full shadow-xs">
+                ⭐ VIP UNLOCKED
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -420,23 +522,29 @@ export default function App() {
       </header>
 
       {/* ====================================================================
-          TOP YELLOW BANNER WHEN USER DECLINES PAYMENT
+          1X FREE PEEK BADGE / SHAME HARD-LOCK BANNER
          ==================================================================== */}
+      {freePeekJustUsed && !isVip && (
+        <div className="bg-emerald-50 border-b border-emerald-200 px-4 py-2 text-center text-xs text-emerald-900 font-medium">
+          🎁 <strong>1st Spin Was Free!</strong> Your one-time free peek was
+          used. Future spins require the {PAYMENT_CONFIG.singlePriceDisplay} Viewing Pass.
+        </div>
+      )}
+
       {shameBanner && (
         <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 text-center text-xs sm:text-sm text-amber-900 flex flex-wrap items-center justify-center gap-3">
           <span>
-            <strong>Result discarded:</strong> You refused to pay the{" "}
-            <span className="underline font-semibold">₱60.92 Viewing Fee</span>,
-            so we locked your result away.
+            🔒 <strong>Result Locked:</strong> You refused the{" "}
+            <span className="font-semibold underline">
+              {PAYMENT_CONFIG.singlePriceDisplay} Viewing Pass
+            </span>
+            . Result remains hidden until unlocked.
           </span>
           <button
-            onClick={() => {
-              setShameBanner(false);
-              setStatus("revealed");
-            }}
-            className="text-xs font-bold text-amber-900 bg-amber-200/70 hover:bg-amber-200 px-2.5 py-1 rounded-md underline cursor-pointer shrink-0 transition"
+            onClick={() => setStatus("paywall")}
+            className="text-xs font-bold text-white bg-[#2563EB] hover:bg-blue-700 px-3 py-1 rounded-md cursor-pointer shrink-0 transition shadow-xs"
           >
-            Fine, let me peek for free
+            Unlock Now ({PAYMENT_CONFIG.singlePriceDisplay})
           </button>
         </div>
       )}
@@ -496,26 +604,30 @@ export default function App() {
                   </svg>
                 </div>
 
-                {/* FROSTED GLASS BLUR OVERLAY WHEN LOCKED */}
-                {(status === "paywall" || status === "checkout" || shameBanner) && (
-                  <div className="absolute inset-0 backdrop-blur-xs bg-white/60 rounded-full flex flex-col items-center justify-center p-6 text-center border border-slate-200">
-                    <span className="text-2xl mb-1">🔒</span>
-                    <p className="font-bold text-slate-900 text-sm">
-                      Result Hidden — Pay ₱60.92 to unblur winner
+                {/* FROSTED GLASS BLUR OVERLAY WHEN LOCKED (SECURITY PROTECTED) */}
+                {isResultLocked && (
+                  <div className="absolute inset-0 backdrop-blur-md bg-white/70 rounded-full flex flex-col items-center justify-center p-6 text-center border border-slate-300">
+                    <span className="text-3xl mb-1">🔒</span>
+                    <p className="font-extrabold text-slate-900 text-sm">
+                      Result Locked
+                    </p>
+                    <p className="text-[11px] text-slate-500 mt-0.5 max-w-[200px]">
+                      Pay {PAYMENT_CONFIG.singlePriceDisplay} or 1 USDT to unblur
+                      and reveal the winner.
                     </p>
                     <button
                       onClick={() => setStatus("paywall")}
-                      className="mt-2.5 px-3 py-1 bg-[#2563EB] hover:bg-blue-700 text-white text-xs font-semibold rounded-md shadow-xs cursor-pointer transition"
+                      className="mt-3 px-3.5 py-1.5 bg-[#2563EB] hover:bg-blue-700 text-white text-xs font-semibold rounded-md shadow-xs cursor-pointer transition active:scale-95"
                     >
-                      Unlock Result (₱60.92)
+                      Unlock Result ({PAYMENT_CONFIG.singlePriceDisplay})
                     </button>
                   </div>
                 )}
               </div>
 
-              {/* REVEALED WINNER CELEBRATION BOX */}
+              {/* REVEALED WINNER CELEBRATION BOX (Rendered only when revealed) */}
               {status === "revealed" && winner && (
-                <div className="mt-5 w-full bg-emerald-50 border border-emerald-200 rounded-lg p-3.5 text-center">
+                <div className="mt-5 w-full bg-emerald-50 border border-emerald-200 rounded-lg p-3.5 text-center animate-in fade-in zoom-in-95 duration-200">
                   <p className="text-xs uppercase tracking-wider text-emerald-700 font-semibold">
                     The winner is:
                   </p>
@@ -532,6 +644,12 @@ export default function App() {
               >
                 {status === "spinning" ? "Spinning..." : "Spin the Wheel"}
               </button>
+
+              {!hasUsedFreePeek && !isVip && (
+                <span className="text-[11px] text-emerald-600 font-medium mt-2">
+                  ✨ 1st Spin is 100% Free!
+                </span>
+              )}
             </div>
 
             {/* OPTIONS INPUT COLUMN */}
@@ -557,7 +675,7 @@ export default function App() {
                   type="text"
                   value={newOption}
                   onChange={(e) => setNewOption(e.target.value)}
-                  placeholder="Add an option (e.g. Samgyup)..."
+                  placeholder="Add option (e.g. Samgyup)..."
                   maxLength={28}
                   className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-[#2563EB] bg-white"
                 />
@@ -626,7 +744,7 @@ export default function App() {
                 }}
                 className="w-40 h-40 relative coin-body"
               >
-                {/* Heads (Side A) Face — Silver Outer Ring + Gold Center */}
+                {/* Heads (Side A) */}
                 <div className="coin-face absolute inset-0 rounded-full bg-gradient-to-br from-slate-200 via-slate-300 to-slate-400 p-3.5 shadow-md border-4 border-slate-300 flex items-center justify-center">
                   <div className="w-full h-full rounded-full bg-gradient-to-br from-amber-300 via-amber-400 to-amber-500 border-2 border-amber-600/40 flex flex-col items-center justify-center p-2 text-center shadow-inner">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-amber-900/75">
@@ -638,7 +756,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Tails (Side B) Face */}
+                {/* Tails (Side B) */}
                 <div className="coin-face coin-face-back absolute inset-0 rounded-full bg-gradient-to-br from-slate-200 via-slate-300 to-slate-400 p-3.5 shadow-md border-4 border-slate-300 flex items-center justify-center">
                   <div className="w-full h-full rounded-full bg-gradient-to-br from-amber-400 via-amber-500 to-amber-600 border-2 border-amber-700/40 flex flex-col items-center justify-center p-2 text-center shadow-inner">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-amber-950/75">
@@ -652,17 +770,17 @@ export default function App() {
               </div>
 
               {/* Frosted Blur Lock Overlay on Coin */}
-              {(status === "paywall" || status === "checkout" || shameBanner) && (
-                <div className="absolute -inset-2 backdrop-blur-xs bg-white/60 rounded-full border border-slate-200 flex flex-col items-center justify-center text-center p-3">
-                  <span className="text-xl">🔒</span>
+              {isResultLocked && (
+                <div className="absolute -inset-2 backdrop-blur-md bg-white/70 rounded-full border border-slate-300 flex flex-col items-center justify-center text-center p-3">
+                  <span className="text-2xl">🔒</span>
                   <span className="text-[11px] font-bold text-slate-900 mt-1 leading-tight">
-                    Result Hidden — Pay ₱60.92 to unblur winner
+                    Result Locked
                   </span>
                   <button
                     onClick={() => setStatus("paywall")}
                     className="mt-1.5 px-2.5 py-1 bg-[#2563EB] text-white text-[10px] font-semibold rounded cursor-pointer transition hover:bg-blue-700"
                   >
-                    Unlock (₱60.92)
+                    Unlock ({PAYMENT_CONFIG.singlePriceDisplay})
                   </button>
                 </div>
               )}
@@ -670,7 +788,7 @@ export default function App() {
 
             {/* Revealed Coin Winner Box */}
             {status === "revealed" && winner && (
-              <div className="mt-3 mb-2 w-full bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-center">
+              <div className="mt-3 mb-2 w-full bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-center animate-in fade-in zoom-in-95 duration-200">
                 <p className="text-xs text-emerald-700 font-semibold uppercase">
                   The coin landed on:
                 </p>
@@ -680,7 +798,7 @@ export default function App() {
               </div>
             )}
 
-            {/* Custom Inputs for Heads & Tails */}
+            {/* Inputs for Heads & Tails */}
             <div className="w-full grid grid-cols-2 gap-3 mt-4">
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1">
@@ -689,7 +807,8 @@ export default function App() {
                 <input
                   type="text"
                   value={sideA}
-                  onChange={(e) => setSideA(e.target.value)}
+                  onChange={(e) => setSideA(sanitizeInput(e.target.value))}
+                  maxLength={30}
                   className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-[#2563EB]"
                 />
               </div>
@@ -700,13 +819,14 @@ export default function App() {
                 <input
                   type="text"
                   value={sideB}
-                  onChange={(e) => setSideB(e.target.value)}
+                  onChange={(e) => setSideB(sanitizeInput(e.target.value))}
+                  maxLength={30}
                   className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-[#2563EB]"
                 />
               </div>
             </div>
 
-            {/* Quick English Presets */}
+            {/* Quick Presets */}
             <div className="w-full mt-3">
               <span className="block text-[11px] text-slate-400 mb-1.5">
                 Quick Presets:
@@ -738,12 +858,18 @@ export default function App() {
             >
               {status === "spinning" ? "Flipping..." : "Flip Coin"}
             </button>
+
+            {!hasUsedFreePeek && !isVip && (
+              <span className="text-[11px] text-emerald-600 font-medium mt-2">
+                ✨ 1st Flip is 100% Free!
+              </span>
+            )}
           </div>
         )}
       </main>
 
       {/* ====================================================================
-          THE PUNCHLINE: PHILIPPINE PESO (₱) PAYWALL MODAL (ENGLISH COPY)
+          THE PAYWALL MODAL (FIXED ₱60 & ₱499 PRICING)
          ==================================================================== */}
       {status === "paywall" && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
@@ -756,65 +882,55 @@ export default function App() {
                 Unlock Result to View Winner
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Spinning the wheel is 100% free, but seeing where it landed
-                requires a one-time viewing pass.
+                Your 1x free peek has been used. Unblurring where it landed
+                requires a viewing pass.
               </p>
             </div>
 
-            {/* ITEMIZED RECEIPT BOX IN PHP (₱) */}
+            {/* ITEMIZED RECEIPT BOX */}
             <div className="my-4 bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs space-y-2">
               <div className="font-semibold text-slate-700 pb-1.5 border-b border-slate-200 flex justify-between">
                 <span>Itemized Receipt Breakdown</span>
                 <span>PHP (₱)</span>
               </div>
-              <div className="flex justify-between text-slate-600">
-                <span>Result Unblur Fee (1x peek)</span>
-                <span>₱29.00</span>
-              </div>
-              <div className="flex justify-between text-slate-600">
-                <span>Gravity & Friction Processing Fee</span>
-                <span>₱12.00</span>
-              </div>
-              <div className="flex justify-between text-slate-600">
-                <span>E-Wallet Convenience Fee</span>
-                <span>₱15.00</span>
-              </div>
-              <div className="flex justify-between text-slate-600">
-                <span>12% Value Added Tax (VAT)</span>
-                <span>₱4.92</span>
-              </div>
+              {PAYMENT_CONFIG.receiptItems.map((item, idx) => (
+                <div key={idx} className="flex justify-between text-slate-600">
+                  <span>{item.label}</span>
+                  <span>{item.amount}</span>
+                </div>
+              ))}
               <div className="pt-2 border-t border-slate-200 flex justify-between font-bold text-sm text-slate-900">
                 <span>Total Amount Due</span>
-                <span className="text-[#2563EB]">₱60.92</span>
+                <span className="text-[#2563EB]">
+                  {PAYMENT_CONFIG.singlePriceDisplay}
+                </span>
               </div>
             </div>
 
-            {/* 3 SATIRICAL PRICING CARDS */}
+            {/* 3 PRICING CARDS */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 my-4 text-left">
-              {/* Card 1: Free Tier */}
+              {/* Free Tier */}
               <div className="border border-slate-200 rounded-xl p-3 bg-slate-50/70 opacity-80 flex flex-col justify-between">
                 <div>
-                  <div className="text-xs font-bold text-slate-700">
-                    Free Tier
-                  </div>
+                  <div className="text-xs font-bold text-slate-700">Free Tier</div>
                   <div className="text-lg font-extrabold text-slate-900 mt-0.5">
                     ₱0
                   </div>
                   <ul className="text-[11px] text-slate-500 mt-2 space-y-1">
-                    <li>✓ Unlimited wheel spins</li>
+                    <li>✓ 1x Free peek (Used)</li>
                     <li>✕ Result remains blurred</li>
-                    <li>✕ 85% weighted toward worst option</li>
+                    <li>✕ Weighted against you</li>
                   </ul>
                 </div>
                 <button
                   disabled
                   className="mt-3 w-full py-1.5 text-[11px] bg-slate-200 text-slate-500 font-semibold rounded-md cursor-not-allowed"
                 >
-                  Current Plan
+                  Expired
                 </button>
               </div>
 
-              {/* Card 2: Single Peek Pass (Highlighted with POPULAR badge) */}
+              {/* Single Peek Pass */}
               <div className="border-2 border-[#2563EB] rounded-xl p-3 bg-blue-50/30 relative flex flex-col justify-between shadow-xs">
                 <span className="absolute -top-2 right-2 bg-[#2563EB] text-white text-[9px] font-bold px-1.5 py-0.5 rounded">
                   POPULAR
@@ -824,55 +940,47 @@ export default function App() {
                     Single Peek Pass
                   </div>
                   <div className="text-lg font-extrabold text-slate-900 mt-0.5">
-                    ₱60.92
-                    <span className="text-[10px] font-normal text-slate-500">
-                      {" "}
-                      / spin
-                    </span>
+                    {PAYMENT_CONFIG.singlePriceDisplay}
                   </div>
                   <ul className="text-[11px] text-slate-600 mt-2 space-y-1">
-                    <li>✓ Unblurs current result</li>
-                    <li>✓ 12% VAT included</li>
-                    <li>✕ No refunds if you hate the outcome</li>
+                    <li>✓ Unblurs current winner</li>
+                    <li>✓ GCash, Maya, or USDT</li>
+                    <li>✓ Instant unlock verification</li>
                   </ul>
                 </div>
                 <button
                   onClick={() => openCheckout("single")}
-                  className="mt-3 w-full py-1.5 text-[11px] bg-[#2563EB] hover:bg-blue-700 text-white font-semibold rounded-md cursor-pointer transition shadow-xs"
+                  className="mt-3 w-full py-1.5 text-[11px] bg-[#2563EB] hover:bg-blue-700 text-white font-semibold rounded-md cursor-pointer transition shadow-xs active:scale-95"
                 >
-                  Pay ₱60.92
+                  Pay {PAYMENT_CONFIG.singlePriceDisplay}
                 </button>
               </div>
 
-              {/* Card 3: VIP Overlord Pro */}
+              {/* VIP Overlord Pro */}
               <div className="border border-slate-200 rounded-xl p-3 flex flex-col justify-between">
                 <div>
                   <div className="text-xs font-bold text-slate-800">
                     VIP Overlord Pro
                   </div>
                   <div className="text-lg font-extrabold text-slate-900 mt-0.5">
-                    ₱499
-                    <span className="text-[10px] font-normal text-slate-500">
-                      {" "}
-                      / month
-                    </span>
+                    {PAYMENT_CONFIG.monthlyPriceDisplay}
                   </div>
                   <ul className="text-[11px] text-slate-600 mt-2 space-y-1">
                     <li>✓ Unlimited result viewing</li>
-                    <li>✓ Rig the wheel in your favor</li>
-                    <li>✓ Priority GCash support</li>
+                    <li>✓ Permanent VIP badge</li>
+                    <li>✓ Rig the wheel anytime</li>
                   </ul>
                 </div>
                 <button
                   onClick={() => openCheckout("monthly")}
-                  className="mt-3 w-full py-1.5 text-[11px] bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-md cursor-pointer transition shadow-xs"
+                  className="mt-3 w-full py-1.5 text-[11px] bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-md cursor-pointer transition shadow-xs active:scale-95"
                 >
-                  Subscribe (₱499)
+                  Subscribe ({PAYMENT_CONFIG.monthlyPriceDisplay})
                 </button>
               </div>
             </div>
 
-            {/* SHAME DECLINE LINK AT BOTTOM */}
+            {/* SHAME DECLINE LINK (STRICTLY LOCKS - NO FREE PEEK) */}
             <div className="text-center pt-2">
               <button
                 onClick={handleDeclinePaywall}
@@ -886,14 +994,14 @@ export default function App() {
       )}
 
       {/* ====================================================================
-          FAKE LOCAL E-WALLET CHECKOUT MODAL (GCash / Maya / BDO & BPI)
+          REAL CHECKOUT MODAL (GCASH, MAYA, USDT)
          ==================================================================== */}
       {status === "checkout" && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white border border-slate-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl my-auto animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <span className="font-bold text-sm text-slate-900">
-                Express E-Wallet Checkout
+                Payment & Verification
               </span>
               <button
                 onClick={() => setStatus("paywall")}
@@ -912,7 +1020,7 @@ export default function App() {
                 }}
                 className={`py-1.5 rounded-md cursor-pointer transition ${
                   paymentMethod === "gcash"
-                    ? "bg-[#2563EB] text-white shadow-xs"
+                    ? "bg-[#007DFE] text-white shadow-xs"
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
@@ -933,116 +1041,149 @@ export default function App() {
               </button>
               <button
                 onClick={() => {
-                  setPaymentMethod("bpi");
+                  setPaymentMethod("usdt");
                   setCheckoutStep("qr");
                 }}
                 className={`py-1.5 rounded-md cursor-pointer transition ${
-                  paymentMethod === "bpi"
-                    ? "bg-red-700 text-white shadow-xs"
+                  paymentMethod === "usdt"
+                    ? "bg-teal-700 text-white shadow-xs"
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                BDO / BPI
+                USDT
               </button>
             </div>
 
             {checkoutStep === "qr" && (
-              <div className="text-center">
-                <p className="text-xs text-slate-500">Total Amount to Pay</p>
-                <p className="text-2xl font-extrabold text-slate-900 my-0.5">
-                  {selectedPlan === "single" ? "₱60.92" : "₱499.00"}
-                </p>
-                <p className="text-[11px] text-slate-400 mb-3">
-                  Scan QR Ph using your <strong>{paymentMethodLabel}</strong>{" "}
-                  app
-                </p>
+              <div>
+                <div className="text-center mb-2">
+                  <p className="text-xs text-slate-500">Amount Due</p>
+                  <p className="text-2xl font-extrabold text-slate-900 my-0.5">
+                    {paymentMethod === "usdt"
+                      ? selectedPlan === "single"
+                        ? PAYMENT_CONFIG.singlePriceUsdt
+                        : PAYMENT_CONFIG.monthlyPriceUsdt
+                      : selectedPlan === "single"
+                      ? PAYMENT_CONFIG.singlePriceDisplay
+                      : PAYMENT_CONFIG.monthlyPriceDisplay}
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    Scan QR using your <strong>{currentMethod.name}</strong> app
+                  </p>
+                </div>
 
-                {/* QR Ph Code Box */}
-                <div className="w-44 h-44 mx-auto bg-white border-2 border-slate-200 rounded-xl p-3 flex flex-col items-center justify-center relative shadow-2xs">
-                  <svg viewBox="0 0 100 100" className="w-full h-full">
-                    <rect x="5" y="5" width="25" height="25" fill="#0f172a" />
-                    <rect x="10" y="10" width="15" height="15" fill="#fff" />
-                    <rect x="14" y="14" width="7" height="7" fill="#0f172a" />
+                {/* Real Cropped QR Code Image */}
+                <div className="w-52 h-52 mx-auto bg-white border-2 border-slate-200 rounded-xl p-2 flex flex-col items-center justify-center relative shadow-xs overflow-hidden">
+                  <img
+                    src={currentMethod.qrImage}
+                    alt={`${currentMethod.name} QR Code`}
+                    className="w-full h-full object-contain rounded-lg"
+                  />
+                </div>
 
-                    <rect x="70" y="5" width="25" height="25" fill="#0f172a" />
-                    <rect x="75" y="10" width="15" height="15" fill="#fff" />
-                    <rect x="79" y="14" width="7" height="7" fill="#0f172a" />
-
-                    <rect x="5" y="70" width="25" height="25" fill="#0f172a" />
-                    <rect x="10" y="75" width="15" height="15" fill="#fff" />
-                    <rect x="14" y="79" width="7" height="7" fill="#0f172a" />
-
-                    {/* Center QR Ph Badge */}
-                    <rect
-                      x="38"
-                      y="38"
-                      width="24"
-                      height="24"
-                      rx="4"
-                      fill="#2563EB"
-                    />
-                    <text
-                      x="50"
-                      y="52"
-                      fill="#ffffff"
-                      fontSize="9"
-                      fontWeight="bold"
-                      textAnchor="middle"
+                {/* Account Details Box */}
+                <div className="mt-3 bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs text-left">
+                  <div className="flex justify-between items-center text-slate-500 mb-1">
+                    <span>Account / Address:</span>
+                    <button
+                      onClick={() =>
+                        handleCopy(currentMethod.accountNumber, "account")
+                      }
+                      className="text-[10px] text-blue-600 hover:underline font-semibold cursor-pointer"
                     >
-                      QR Ph
-                    </text>
-
-                    {/* Data Modules */}
-                    <rect x="40" y="10" width="8" height="8" fill="#0f172a" />
-                    <rect x="52" y="16" width="8" height="14" fill="#0f172a" />
-                    <rect x="12" y="42" width="16" height="8" fill="#0f172a" />
-                    <rect x="70" y="42" width="18" height="8" fill="#0f172a" />
-                    <rect x="14" y="54" width="10" height="10" fill="#0f172a" />
-                    <rect x="42" y="68" width="12" height="22" fill="#0f172a" />
-                    <rect x="64" y="68" width="14" height="14" fill="#0f172a" />
-                    <rect x="82" y="76" width="10" height="14" fill="#0f172a" />
-                  </svg>
+                      {copiedKey === "account" ? "✓ Copied!" : "Copy"}
+                    </button>
+                  </div>
+                  <div className="font-mono text-slate-800 break-all font-semibold text-[11px]">
+                    {currentMethod.accountNumber}
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1">
+                    Name: <strong>{currentMethod.accountName}</strong>
+                  </div>
+                  {currentMethod.network && (
+                    <div className="text-[10px] text-amber-700 font-semibold mt-1">
+                      ⚠️ Network: {currentMethod.network}
+                    </div>
+                  )}
                 </div>
 
-                <div className="mt-2.5 text-[11px] font-mono text-slate-400">
-                  Ref No: {refNumber}
-                </div>
+                {/* Verification Form */}
+                <form onSubmit={handleVerifyPayment} className="mt-3">
+                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                    {currentMethod.inputLabel}
+                  </label>
+                  <input
+                    type="text"
+                    value={userRefInput}
+                    onChange={(e) => setUserRefInput(e.target.value)}
+                    placeholder={currentMethod.inputPlaceholder}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:border-[#2563EB] font-mono"
+                  />
+                  {verificationError && (
+                    <p className="text-[11px] text-red-600 mt-1">
+                      {verificationError}
+                    </p>
+                  )}
 
-                <button
-                  onClick={handleFakeVerifyPayment}
-                  className="mt-4 w-full py-2.5 bg-[#2563EB] hover:bg-blue-700 text-white font-semibold text-xs rounded-lg cursor-pointer transition shadow-xs"
-                >
-                  I've Paid (Verify Reference No.)
-                </button>
+                  <button
+                    type="submit"
+                    className="mt-3 w-full py-2.5 bg-[#2563EB] hover:bg-blue-700 text-white font-semibold text-xs rounded-lg cursor-pointer transition shadow-xs active:scale-95"
+                  >
+                    Verify & Unlock Result
+                  </button>
+                </form>
               </div>
             )}
 
             {checkoutStep === "verifying" && (
-              <div className="py-10 text-center space-y-3">
-                <div className="w-8 h-8 border-4 border-[#2563EB] border-t-transparent rounded-full animate-spin mx-auto" />
-                <p className="text-xs font-semibold text-slate-700">
-                  Checking payment with {paymentMethodLabel}...
+              <div className="py-12 text-center space-y-3">
+                <div className="w-9 h-9 border-4 border-[#2563EB] border-t-transparent rounded-full animate-spin mx-auto" />
+                <p className="text-xs font-semibold text-slate-800">
+                  Verifying transaction code...
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  Connecting to {currentMethod.name} payment network
                 </p>
               </div>
             )}
 
-            {checkoutStep === "shortchange" && (
-              <div className="py-4 text-center space-y-3">
-                <div className="w-10 h-10 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center mx-auto font-bold text-lg">
-                  !
+            {checkoutStep === "success" && verifiedReceipt && (
+              <div className="py-4 text-center space-y-3 animate-in fade-in zoom-in-95 duration-150">
+                <div className="w-11 h-11 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto font-bold text-xl">
+                  ✓
                 </div>
                 <h4 className="font-bold text-slate-900 text-sm">
-                  Payment short by ₱0.25!
+                  Payment Verified!
                 </h4>
-                <p className="text-xs text-slate-500 leading-relaxed">
-                  Inflation increased while you were scanning the QR code. Since
-                  we feel bad for you, you can view this result for free:
-                </p>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-left text-xs space-y-1 font-mono">
+                  <div className="flex justify-between text-slate-500">
+                    <span>Method:</span>
+                    <span className="font-bold text-slate-800">
+                      {verifiedReceipt.method}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-slate-500">
+                    <span>Paid:</span>
+                    <span className="font-bold text-emerald-600">
+                      {verifiedReceipt.amount}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-slate-500">
+                    <span>Ref Code:</span>
+                    <span className="font-bold text-slate-800 truncate max-w-[140px]">
+                      {verifiedReceipt.ref}
+                    </span>
+                  </div>
+                </div>
+
                 <button
-                  onClick={() => setStatus("revealed")}
-                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-lg cursor-pointer transition shadow-xs"
+                  onClick={() => {
+                    setStatus("revealed");
+                    setShameBanner(false);
+                  }}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-lg cursor-pointer transition shadow-xs active:scale-95"
                 >
-                  Reveal Result (Free)
+                  🎉 Unblur & View Result Now
                 </button>
               </div>
             )}
@@ -1052,7 +1193,7 @@ export default function App() {
 
       {/* Footer */}
       <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-400">
-        <p>PickMo — All rights reversed. Free spins forever.</p>
+        <p>PickMo — Decisions made simple. All rights reserved.</p>
       </footer>
     </div>
   );
