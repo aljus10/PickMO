@@ -1,78 +1,70 @@
-# 🎯 PickMo — Simple Wheel & Coin Picker
+# PickMo
 
-A modern decision-making web application featuring a customizable wheel picker, a 3D Philippine ₱10 coin flipper, native Web Audio sound synthesizer, and a satirical Philippine Peso / Crypto paywall flow with real QR code verification (GCash, Maya, and USDT Ethereum).
+A lightweight, modern web utility for making quick everyday decisions using an interactive customizable wheel and a 3D coin flip simulator.
 
----
-
-## ✨ Features & Game Flow
-
-1. **🎁 1x Free Peek**: The user's very first spin or coin flip is 100% free! It smoothly reveals the winner, establishing trust.
-2. **🔒 Hard Paywall on 2nd Spin+**: On the second spin and beyond, the paywall slams shut at 98% deceleration. The winner is blurred and strictly locked behind the **₱60.00** Viewing Pass (or **1.05 USDT**). No bypasses or free peeks.
-3. **💳 Real Payment Gateways Supported**:
-   - **GCash**: Real cropped InstaPay QR code with copyable account details.
-   - **Maya**: Real cropped QR code with username `@aljus10`.
-   - **USDT (Crypto)**: Ethereum network (ERC-20) wallet address `0xd8c8e26e0c230611d5ed8ac51e868f1d7cda769d` with 1-click address copy.
-4. **✅ Payment & Reference Verification**:
-   - Users enter their Reference Number or Transaction Hash (TxHash).
-   - Validates input format, simulates gateway clearing, issues a verifiable digital receipt, and unblurs the winner!
-   - Purchasing the **VIP Overlord Pro (₱499)** permanently unlocks all future spins with a VIP badge.
-5. **🛡️ Built-in Security**:
-   - **DOM Sanitization**: Result winner string is withheld from the DOM while locked to prevent DevTools inspect peeking.
-   - **Input Sanitization**: Wheel options and reference fields are sanitized against XSS.
-   - **Cloudflare Security Headers**: Pre-configured `_headers` with strict `Content-Security-Policy`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and `Strict-Transport-Security`.
+Built with React, TypeScript, Vite, and Tailwind CSS.
 
 ---
 
-## 🚀 Local Development
+## Overview
+
+PickMo provides a minimalist, clean interface designed to solve indecision—whether choosing what to eat, picking tasks, or settling 50/50 dilemmas.
+
+### Highlights
+
+- **Dynamic Decision Wheel**: Smooth SVG-based physics wheel with customizable slices and audio-assisted deceleration.
+- **3D Perspective Coin Flipper**: Bi-metallic coin flip simulation utilizing CSS 3D perspective transforms.
+- **Audio Synthesizer Engine**: Procedural Web Audio API integration with zero external asset dependencies.
+- **Zero Third-Party UI Bloat**: Handcrafted responsive UI optimized for performance and mobile responsiveness.
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js (v18.0.0 or higher)
+- npm
+
+### Installation
 
 ```bash
-# 1. Install dependencies
+# Clone the repository
+git clone https://github.com/aljus10/PickMO.git
+cd PickMO
+
+# Install dependencies
 npm install
 
-# 2. Start local dev server
+# Start development server
 npm run dev
+```
 
-# 3. Build for production
+The app will be available locally at `http://localhost:5173`.
+
+### Production Build
+
+```bash
 npm run build
 ```
 
----
-
-## ☁️ How to Deploy to Cloudflare Pages (Custom Domain)
-
-To have your own clean website domain (e.g. `pickmo.com` or `pickmo.yourdomain.com` with **no** `.vercel.app` or other branding):
-
-### Step 1: Push your code to GitHub
-If you haven't pushed yet:
-```bash
-git add .
-git commit -m "Update: 1x free peek, real QR codes, and Cloudflare config"
-git push -u origin main
-```
-
-### Step 2: Connect to Cloudflare Pages
-1. Log in to your [Cloudflare Dashboard](https://dash.cloudflare.com/).
-2. In the left navigation, click **Compute (Workers & Pages)** > **Pages** > **Connect to Git**.
-3. Select your **GitHub** account and choose your `PickMO` repository.
-4. Set up the build settings:
-   - **Framework preset**: `Vite`
-   - **Build command**: `npm run build`
-   - **Build output directory**: `dist`
-   - **Root directory**: `/`
-5. Click **Save and Deploy**. Cloudflare will build and deploy your site in ~30 seconds!
-
-### Step 3: Add Your Custom Domain (Remove Any Platform Subdomains)
-1. Once deployed, open your project in the Cloudflare Pages dashboard.
-2. Click the **Custom domains** tab.
-3. Click **Set up a custom domain**.
-4. Enter your domain (e.g., `pickmo.com` or `app.yourdomain.com`).
-5. Cloudflare automatically sets up DNS routing and provisions an SSL/TLS certificate. Your website will now be live on your custom domain with zero third-party branding.
+Compiled static output will be generated in the `dist/` directory.
 
 ---
 
-## ⚙️ Configuration
+## Tech Stack
 
-All payment methods, pricing, and QR codes are managed in [`src/config.ts`](./src/config.ts):
-- Single Peek Pass: `₱60.00` / `1.05 USDT`
-- VIP Overlord Pro: `₱499.00` / `9.00 USDT`
-- QR code images: stored in `/public/qr-gcash.png`, `/public/qr-maya.png`, and `/public/qr-usdt.png`.
+- **Frontend**: React 18
+- **Language**: TypeScript
+- **Bundler**: Vite
+- **Styling**: Tailwind CSS
+- **Audio**: Web Audio API (Native Oscillator & Gain Nodes)
+- **Deployment**: Cloudflare Pages / Static Hosting
+
+---
+
+## License & Usage
+
+© 2026 Al Justin Marollano. All rights reserved.
+
+This repository is maintained for portfolio, personal development, and demonstration purposes. No license is granted for public redistribution, mirroring, commercial reproduction, or unauthorized cloning of the application flow without prior written consent.
