@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .coin-container {
+    perspective: 900px;
+  }
+  .coin-body {
+    transform-style: preserve-3d;
+  }
+  .coin-face {
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+  .coin-face-back {
+    transform: rotateX(180deg);
+  }
+}
